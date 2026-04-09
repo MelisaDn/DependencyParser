@@ -7,80 +7,60 @@ from pathlib import Path
 nlp = stanza.Pipeline(
     lang="tr",
     processors="tokenize,pos,lemma,depparse",
-    use_gpu=False
+    use_gpu=True
 )
 
-input_path = Path("dataset/tr-dev-v1.1.json")
-output_path = Path("dataset_with_sentence_graphs.json")
+input_path = Path("dataset/morph-disamb-tr-train-v1.1.json")
+output_path = Path("dataset/dependencies-tr-train-v1.1.json")
+
+
+def parse_sentence_dependencies(text: str) -> dict:
+    """
+    Parses one sentence and returns only dependency information.
+    """
+    result = {
+        "sentence": text,
+        "dependencies": []
+    }
+
+    if text is None or not text.strip():
+        return result
+
+    doc = nlp(text)
+
+    if not doc.sentences:
+        return result
+
+    sent = doc.sentences[0]
+
+    for word in sent.words:
+        result["dependencies"].append({
+            "dep_id": word.id,
+            "head_id": word.head,
+            "deprel": word.deprel
+        })
+
+    return result
+
 
 with input_path.open("r", encoding="utf-8") as f:
     data = json.load(f)
 
 
-def safe_lemma(word):
-    if word.lemma is None or str(word.lemma).strip() == "":
-        return word.text.lower()
-    return word.lemma
+for article in data.get("data", []):
+    for paragraph in article.get("paragraphs", []):
+        context_sentences = paragraph.get("context_sentences", [])
 
+        paragraph["context_dependencies"] = [
+            parse_sentence_dependencies(sentence_text)
+            for sentence_text in context_sentences
+        ]
 
-def parse_text_to_sentence_graphs(text: str):
-    doc = nlp(text)
-    parsed_sentences = []
+        for qa in paragraph.get("qas", []):
+            question_text = qa.get("question", "")
 
-    for sent_idx, sent in enumerate(doc.sentences, start=1):
-        tokens = []
-        dependencies = []
-        root_token_id = None
-        root_token_text = None
+            qa["question_dependencies"] = parse_sentence_dependencies(question_text)
 
-        for w in sent.words:
-            token_info = {
-                "id": w.id,
-                "text": w.text,
-                "lemma": safe_lemma(w),
-                "upos": w.upos,
-                "xpos": w.xpos,
-                "feats": w.feats,
-                "head": w.head,
-                "deprel": w.deprel
-            }
-            tokens.append(token_info)
-
-            if w.deprel == "root":
-                root_token_id = w.id
-                root_token_text = w.text
-
-        for head, rel, dep in sent.dependencies:
-            dependencies.append({
-                "head_id": 0 if head.id is None else head.id,
-                "head_text": "ROOT" if head.id is None else head.text,
-                "deprel": rel,
-                "dep_id": dep.id,
-                "dep_text": dep.text
-            })
-
-        parsed_sentences.append({
-            "sentence_id": sent_idx,
-            "text": sent.text,
-            "root_token_id": root_token_id,
-            "root_token_text": root_token_text,
-            "tokens": tokens,
-            "dependencies": dependencies
-        })
-
-    return parsed_sentences
-
-
-for article in data["data"]:
-    for paragraph in article["paragraphs"]:
-        paragraph["context_sentences_parsed"] = parse_text_to_sentence_graphs(
-            paragraph["context"]
-        )
-
-        for qa in paragraph["qas"]:
-            qa["question_sentences_parsed"] = parse_text_to_sentence_graphs(
-                qa["question"]
-            )
 
 with output_path.open("w", encoding="utf-8") as f:
     json.dump(data, f, ensure_ascii=False, indent=2)
