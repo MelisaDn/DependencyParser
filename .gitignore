@@ -12,3 +12,4 @@ __pycache__/
 dataset/
 dataset_with_sentence_graphs.json
 dataset smaller version exp.json
+dataset.zip
